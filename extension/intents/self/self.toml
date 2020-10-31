@@ -23,9 +23,10 @@ match = """
   tell me about (this | firefox voice | this extension | voice)
   help
   what (else |) (can | should) (I | you) (do | say | ask) (you | from you | of you |)
-  (hello | hi)
+  hi
   what commands (can | could | will | would |) (I | you |) (say | follow | use | speak |)
   (hello | hi |) how are you (doing |)
+  show options
 """
 
 [[self.openLexicon.example]]
@@ -60,6 +61,15 @@ phrase = "What can I do?"
 [[self.openLexicon.example]]
 phrase = "what should I do"
 test = true
+
+[[self.openLexicon.example]]
+phrase = "Show options"
+
+[self.hello]
+description = "Shows Lionel Richie's handsom face"
+match = """
+  hello
+"""
 
 [self.openOptions]
 description = "Opens the options page"
@@ -98,3 +108,37 @@ phrase = "Say something funny"
 
 [[self.tellJoke.example]]
 phrase = "Make me laugh"
+
+
+[self.simpleTest]
+description = "People often say 'test' to Firefox Voice. We should do a simple test to provide feedback"
+match = """
+  (this is | ) (test | testing) (test | testing |) (test | testing |)
+"""
+
+[[self.simpleTest.example]]
+phrase = "test"
+
+[self.helpIntent]
+description = "This will try to find help for for the intent on lexicon page"
+match = """
+  (show | open |) (help | command{s}) (for | on | about |) [query] (to | for |) (me |)
+"""
+
+[[self.helpIntent.example]]
+phrase = "help on search"
+
+[self.smartSpeaker]
+description = "This will enable or disable the wakeword and turn on or off audio output"
+match = """
+  (enable | turn on | activate | start) smart speaker (mode |) [activate=true]
+  smart speaker (mode |) (on | active | activate | enabled | start) [activate=true]
+  (disable | turn off | deactivate | stop) smart speaker (mode |) [activate=false]
+  smart speaker (mode |) (off | deactivate | disabled | stop) [activate=false]
+"""
+
+[[self.smartSpeaker.example]]
+phrase = "enable smart speaker mode"
+
+[[self.smartSpeaker.example]]
+phrase = "smart speaker off"

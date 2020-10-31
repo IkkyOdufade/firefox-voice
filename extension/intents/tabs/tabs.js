@@ -1,5 +1,8 @@
-/* globals buildSettings */
+/* globals buildSettings,Fuse,log */
+import { sendMessage } from "../../communicate.js";
 import * as intentRunner from "../../background/intentRunner.js";
+import * as browserUtil from "../../browserUtil.js";
+import English from "../../language/langs/english.js";
 
 const MAX_ZOOM = 3;
 const MIN_ZOOM = 0.3;
@@ -24,6 +27,9 @@ const defaultZoomValues = [
 // get tracked (we assume you just passed over the tab)
 const TRACK_TAB_ACTIVATE_MINIMUM = 1500;
 
+let lastIndex;
+let rangeData;
+
 function nextLevel(levels, current) {
   for (const level of levels) {
     if (current < level) {
@@ -46,7 +52,7 @@ async function updateZoom(context, operation) {
   // 0 -> Reset
   // 1 -> zoom in
   // -1 -> zoom out
-  const activeTab = await context.activeTab();
+  const activeTab = await browserUtil.activeTab();
   if (operation === 0) {
     await browser.tabs.setZoom(activeTab.id, DEFAULT_ZOOM);
   } else {
@@ -97,9 +103,22 @@ intentRunner.registerIntent({
 intentRunner.registerIntent({
   name: "tabs.close",
   async run(context) {
-    const activeTab = await context.activeTab();
+    const activeTab = await browserUtil.activeTab();
     await browser.tabs.remove(activeTab.id);
-    context.displayText("Tab closed");
+    context.presentMessage("Tab closed");
+  },
+});
+
+intentRunner.registerIntent({
+  name: "tabs.closeAll",
+  async run(context) {
+    const inactiveAndUnpinnedTabs = await browser.tabs.query({
+      active: false,
+      currentWindow: true,
+      pinned: false,
+    });
+    browser.tabs.remove(inactiveAndUnpinnedTabs.map(tab => tab.id));
+    context.presentMessage("All Tabs closed");
   },
 });
 
@@ -120,7 +139,7 @@ intentRunner.registerIntent({
 intentRunner.registerIntent({
   name: "tabs.open",
   async run(context) {
-    // context.createTab is the normal way to do this, but it sometimes doesn't open a new tab
+    // browserUtil.createTab is the normal way to do this, but it sometimes doesn't open a new tab
     // Since the user asked, we definitely want to open a new tab
     await browser.tabs.create({ active: true });
   },
@@ -129,7 +148,7 @@ intentRunner.registerIntent({
 intentRunner.registerIntent({
   name: "tabs.pin",
   async run(context) {
-    const activeTab = await context.activeTab();
+    const activeTab = await browserUtil.activeTab();
     await browser.tabs.update(activeTab.id, { pinned: true });
   },
 });
@@ -137,7 +156,7 @@ intentRunner.registerIntent({
 intentRunner.registerIntent({
   name: "tabs.unpin",
   async run(context) {
-    const activeTab = await context.activeTab();
+    const activeTab = await browserUtil.activeTab();
     await browser.tabs.update(activeTab.id, { pinned: false });
   },
 });
@@ -151,7 +170,14 @@ intentRunner.registerIntent({
     // "canceled"
     // "not_saved"
     // "not_replaced"
-    await browser.tabs.saveAsPDF({});
+    try {
+      await browser.tabs.saveAsPDF({});
+    } catch (e) {
+      if (e.message === "Not supported on Mac OS X") {
+        e.displayMessage = "Save as PDF is not supported on Mac OS X";
+        throw e;
+      }
+    }
   },
 });
 
@@ -165,7 +191,7 @@ intentRunner.registerIntent({
 intentRunner.registerIntent({
   name: "tabs.duplicate",
   async run(context) {
-    const activeTab = await context.activeTab();
+    const activeTab = await browserUtil.activeTab();
     await browser.tabs.duplicate(activeTab.id);
   },
 });
@@ -183,7 +209,7 @@ if (!buildSettings.android) {
   intentRunner.registerIntent({
     name: "tabs.moveToWindow",
     async run(context) {
-      const activeTab = await context.activeTab();
+      const activeTab = await browserUtil.activeTab();
       await browser.windows.create({ tabId: activeTab.id });
     },
   });
@@ -258,10 +284,15 @@ intentRunner.registerIntent({
       await switchDir(tabs, context.parameters.dir);
       return;
     }
-    const activeTab = await context.activeTab();
+    const activeTab = await browserUtil.activeTab();
     let found;
     for (const tabId of tabHistory) {
       if (tabId === activeTab.id) {
+        continue;
+      }
+      try {
+        await browser.tabs.get(tabId);
+      } catch (e) {
         continue;
       }
       found = tabId;
@@ -272,7 +303,7 @@ intentRunner.registerIntent({
       await switchDir(tabs, context.parameters.dir);
       return;
     }
-    context.makeTabActive(found);
+    browserUtil.makeTabActive(found);
   },
 });
 
@@ -439,13 +470,50 @@ async function getMatchingTabs(options) {
   let matchingTabs = await browser.tabs.query(tabQuery);
 
   if (options.query !== undefined) {
-    matchingTabs = matchingTabs.filter(tab => {
-      const query = options.query.toLowerCase();
-      return (
-        new URL(tab.url).origin.includes(query) ||
-        tab.title.toLowerCase().includes(query)
-      );
-    });
+    const fuseOptions = {
+      id: "tabId",
+      shouldSort: true,
+      tokenize: true,
+      findAllMatches: true,
+      includeScore: true,
+      threshold: 0.3,
+      location: 0,
+      distance: 100,
+      maxPatternLength: 32,
+      minMatchCharLength: 3,
+      keys: [
+        {
+          name: "title",
+          weight: 0.8,
+        },
+        {
+          name: "url",
+          weight: 0.2,
+        },
+      ],
+    };
+
+    const combinedTabContent = [];
+
+    for (const tab of matchingTabs) {
+      const result = {
+        tabId: tab.id,
+        title: tab.title,
+        url: tab.url,
+      };
+
+      combinedTabContent.push(result);
+    }
+
+    // use Fuse.js to parse the most probable response?
+    const fuse = new Fuse(combinedTabContent, fuseOptions);
+    const matches = fuse.search(options.query);
+    log.debug("find matches:", matches);
+
+    matchingTabs = [];
+    for (const match of matches) {
+      matchingTabs.push(await browser.tabs.get(parseInt(match.item)));
+    }
   }
 
   if (options.sort_by_index === true) {
@@ -460,7 +528,7 @@ async function getMatchingTabs(options) {
 intentRunner.registerIntent({
   name: "tabs.collectMentionedTabs",
   async run(context) {
-    const activeTab = await context.activeTab();
+    const activeTab = await browserUtil.activeTab();
     const currentWindow = await browser.windows.getCurrent();
     const allWindows = await browser.windows.getAll({
       windowTypes: ["normal"],
@@ -502,9 +570,9 @@ intentRunner.registerIntent({
 
       // prefer staying in current window
       if (tabsCurrentWindow !== undefined) {
-        await context.makeTabActive(tabsCurrentWindow[0]);
+        await browserUtil.makeTabActive(tabsCurrentWindow[0]);
       } else {
-        await context.makeTabActive(matchingTabs[0]);
+        await browserUtil.makeTabActive(matchingTabs[0]);
         await browser.windows.update(matchingTabs[0].windowId, {
           focused: true,
         });
@@ -559,20 +627,41 @@ if (!buildSettings.android) {
 }
 
 intentRunner.registerIntent({
+  name: "tabs.refreshSelectedTabs",
+  async run(context) {
+    const tabs = await browser.tabs.query({ highlighted: true });
+    for (const tab of tabs) {
+      await browser.tabs.reload(tab.id);
+    }
+  },
+});
+
+intentRunner.registerIntent({
   name: "tabs.countTabs",
   async run(context) {
     context.keepPopup();
     const tabs = await browser.tabs.query({ currentWindow: true });
     const hiddenTabs = await browser.tabs.query({ hidden: true });
     const numOfOpenTabs = tabs.length - hiddenTabs.length;
+    const sampleTabs = await browser.windows.getAll({ populate: true });
+    let tabsCount = 0;
+    let windowsCount = 1;
+    sampleTabs.forEach((window, index) => {
+      tabsCount += window.tabs.length;
+      windowsCount += index;
+    });
+
     const card = {
       answer: {
-        largeText: `${numOfOpenTabs}`,
-        text: "Open tabs",
+        largeText: tabsCount - hiddenTabs.length,
+        text: `\
+Open Windows: ${windowsCount}
+Tabs in current window: ${numOfOpenTabs}`,
         eduText: `Click mic and say "gather all Google tabs"`,
+        eduMicOn: `Say "gather all Google tabs"`,
       },
     };
-    await browser.runtime.sendMessage({
+    await sendMessage({
       type: "showSearchResults",
       card,
       searchResults: card,
@@ -583,17 +672,278 @@ intentRunner.registerIntent({
 intentRunner.registerIntent({
   name: "tabs.findOnPage",
   async run(context) {
-    let message;
-    const results = await browser.find.find(context.slots.query);
-    await browser.find.highlightResults({
-      noScroll: false,
-      rangeIndex: 0,
+    context.keepPopup();
+    const results = await browser.find.find(context.slots.query, {
+      includeRangeData: true,
     });
+    lastIndex = 0;
+    rangeData = results.rangeData;
+
     if (results.count > 0) {
-      message = `"${context.slots.query}" found ${results.count} times`;
-    } else {
-      message = `"${context.slots.query}" not found`;
+      await browser.find.highlightResults({
+        noScroll: false,
+        rangeIndex: 0,
+      });
     }
-    context.displayText(message);
+
+    const result = getMessage(results.count, context.slots.query);
+
+    await callResult(result);
+
+    await context.startFollowup({
+      heading: result.eduText,
+      acceptFollowupIntent: ["tabs.findOnPageNext", "tabs.findOnPagePrevious"],
+      skipSuccessView: true,
+    });
   },
 });
+
+function getMessage(numberOfResults, query) {
+  if (numberOfResults > 1) {
+    return {
+      largeText: `1 of ${numberOfResults}`,
+      text: `Matches for '${query}'`,
+      eduText: `Say 'next match' or 'previous match'`,
+    };
+  } else if (numberOfResults === 1) {
+    return {
+      largeText: `1`,
+      text: `Match for '${query}'`,
+    };
+  }
+  return {
+    text: `Sorry can't find '${query}' on this page`,
+    eduText: `Try looking for another phrase`,
+    imgSrc: "./images/icon-no-result.svg",
+  };
+}
+
+intentRunner.registerIntent({
+  name: "tabs.findOnPageNext",
+  async run(context) {
+    context.keepPopup();
+
+    const result = await createFindNextAnswer();
+    await callResult(result);
+
+    await context.startFollowup({
+      heading: result.eduText,
+      acceptFollowupIntent: ["tabs.findOnPageNext", "tabs.findOnPagePrevious"],
+      skipSuccessView: true,
+    });
+  },
+});
+
+async function createFindNextAnswer() {
+  if (lastIndex + 1 < rangeData.length) {
+    await moveResults(lastIndex + 1);
+    const hasMore = lastIndex + 1 === rangeData.length;
+
+    return {
+      largeText: `${lastIndex + 1} of ${rangeData.length}`,
+      text: `Matches for '${rangeData[lastIndex].text}'`,
+      eduText: hasMore
+        ? `Say 'previous match' or try looking for another phrase `
+        : `Say 'next match' or 'previous match'`,
+    };
+  }
+  return {
+    text: `No more next matches for '${rangeData[lastIndex].text}'`,
+    eduText: `Say 'previous match' or try looking for another phrase `,
+    imgSrc: "./images/icon-no-result.svg",
+  };
+}
+
+intentRunner.registerIntent({
+  name: "tabs.findOnPagePrevious",
+  async run(context) {
+    const result = await createFindPreviousAnswer();
+    await callResult(result);
+
+    await context.startFollowup({
+      heading: result.eduText,
+      acceptFollowupIntent: ["tabs.findOnPageNext", "tabs.findOnPagePrevious"],
+      skipSuccessView: true,
+    });
+  },
+});
+
+async function createFindPreviousAnswer() {
+  if (lastIndex > 0) {
+    await moveResults(lastIndex - 1);
+    const isFirstMatch = lastIndex === 0;
+
+    return {
+      largeText: `${lastIndex + 1} of ${rangeData.length}`,
+      text: `Matches for '${rangeData[lastIndex].text}'`,
+      eduText: isFirstMatch
+        ? `Say 'next match' or try looking for another phrase `
+        : `Say 'next match' or 'previous match'`,
+    };
+  }
+  return {
+    text: `No more previous matches for '${rangeData[lastIndex].text}'`,
+    eduText: `Say 'next match' or try looking for another phrase `,
+    imgSrc: "./images/icon-no-result.svg",
+  };
+}
+
+async function moveResults(rangeIndex) {
+  await browser.find.highlightResults({
+    noScroll: false,
+    rangeIndex,
+  });
+  return (lastIndex = rangeIndex);
+}
+
+async function callResult(cardAnswer) {
+  const card = {
+    answer: cardAnswer,
+  };
+
+  await sendMessage({
+    type: "showSearchResults",
+    card,
+    searchResults: card,
+  });
+}
+
+intentRunner.registerIntent({
+  name: "tabs.selectAllTabs",
+  async run(context) {
+    const tabs = await browser.tabs.query({
+      currentWindow: true,
+      pinned: false,
+    });
+
+    await selectAllTabs(tabs);
+  },
+});
+
+async function selectAllTabs(tabs) {
+  if (tabs.length !== 0) {
+    for (const tab of tabs) {
+      if (!tab.active) {
+        await browser.tabs.update(tab.id, {
+          highlighted: true,
+          active: false,
+        });
+      } else {
+        await browser.tabs.update(tab.id, {
+          highlighted: true,
+        });
+      }
+    }
+  }
+}
+
+async function highlightTabsInDirection(center, tabs, dir) {
+  if (dir === "left") {
+    tabs = tabs.filter(tab => {
+      return tab.index < center.index;
+    });
+  } else {
+    tabs = tabs.filter(tab => {
+      return tab.index > center.index;
+    });
+  }
+  for (const tab of tabs) {
+    if (!tab.active) {
+      await browser.tabs.update(tab.id, {
+        highlighted: true,
+        active: false,
+      });
+    } else {
+      await browser.tabs.update(tab.id, {
+        highlighted: true,
+      });
+    }
+  }
+}
+
+intentRunner.registerIntent({
+  name: "tabs.selectTabsInDirection",
+  async run(context) {
+    const activeTab = await browserUtil.activeTab();
+    const tabs = await browser.tabs.query({
+      currentWindow: true,
+      pinned: false,
+    });
+
+    const matchingTabs = await getMatchingTabs({
+      tabs,
+      activeTab,
+      sort_by_index: true,
+      allWindows: context.parameters.allWindows === "false",
+    });
+
+    if (matchingTabs.length === 0) {
+      const exc = new Error("No tab that matches the query");
+      exc.displayMessage = "There is no tab that matches the query";
+      throw exc;
+    }
+
+    await highlightTabsInDirection(
+      activeTab,
+      matchingTabs,
+      context.parameters.dir
+    );
+  },
+});
+
+intentRunner.registerIntent({
+  name: "tabs.selectNumbersTabs",
+  async run(context) {
+    const tabs = await browser.tabs.query({
+      currentWindow: true,
+      pinned: false,
+    });
+    const numTabs = English.nameToNumber(
+      context.slots.number || context.parameters.number
+    );
+    await selectNumbersTabs(tabs, numTabs, context.parameters.dir);
+  },
+});
+
+intentRunner.registerIntent({
+  name: "tabs.selectSpecificTabs",
+  async run(context) {
+    const matchingTabs = await getMatchingTabs({
+      query: context.slots.query,
+      sort_by_index: false,
+      allWindows: context.parameters.allWindows === "true",
+    });
+
+    if (matchingTabs.length === 0) {
+      const exc = new Error("No tab that matches the query");
+      exc.displayMessage = "There is no tab that matches the query";
+      throw exc;
+    }
+
+    await selectAllTabs(matchingTabs);
+  },
+});
+
+async function selectNumbersTabs(tabs, numTabs, dir) {
+  if (dir === "first") {
+    tabs = tabs.filter(tab => {
+      return tab.index < numTabs;
+    });
+  } else {
+    tabs = tabs.filter(tab => {
+      return tab.index >= tabs.length - numTabs - 1;
+    });
+  }
+  for (const tab of tabs) {
+    if (!tab.active) {
+      await browser.tabs.update(tab.id, {
+        highlighted: true,
+        active: false,
+      });
+    } else {
+      await browser.tabs.update(tab.id, {
+        highlighted: true,
+      });
+    }
+  }
+}

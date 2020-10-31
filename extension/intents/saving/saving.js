@@ -8,11 +8,10 @@ intentRunner.registerIntent({
     context.savingPage("startSavingPage");
     let filename;
     const activeTab = await browserUtil.activeTab();
-    await content.lazyInject(activeTab.id, [
+
+    await content.inject(activeTab.id, [
       "/js/vendor/freezeDry.js",
-      "/background/pageMetadata-contentScript.js",
-      "/intents/saving/screenshotContentScript.js",
-      "/intents/saving/saveContentScript.js",
+      "/intents/saving/saving.content.js",
     ]);
     const { html, metadata } = await browser.tabs.sendMessage(activeTab.id, {
       type: "freezeHtml",
@@ -27,7 +26,7 @@ intentRunner.registerIntent({
     }
     const blob = htmlToBlob(html);
     await downloadData(context, blob, filename);
-    context.displayText("Page saved to downloads folder");
+    context.presentMessage("Page saved to downloads folder");
   },
 });
 
@@ -66,11 +65,9 @@ intentRunner.registerIntent({
 async function downloadScreenshot(context, type) {
   let filename;
   const activeTab = await browserUtil.activeTab();
-  await content.lazyInject(activeTab.id, [
+  await content.inject(activeTab.id, [
     "/js/vendor/freezeDry.js",
-    "/background/pageMetadata-contentScript.js",
-    "/intents/saving/screenshotContentScript.js",
-    "/intents/saving/saveContentScript.js",
+    "/intents/saving/saving.content.js",
   ]);
   const { png, metadata } = await browser.tabs.sendMessage(activeTab.id, {
     type,
@@ -89,8 +86,8 @@ async function downloadScreenshot(context, type) {
     filename = filename + ".png";
   }
   const blob = dataPngUrlToBlob(png);
-  await downloadData(blob, filename);
-  context.displayText("Screenshot saved to downloads folder");
+  await downloadData(context, blob, filename);
+  context.presentMessage("Screenshot saved to downloads folder");
 }
 
 function dataPngUrlToBlob(url) {

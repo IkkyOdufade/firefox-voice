@@ -3,6 +3,7 @@
 // eslint-disable-next-line no-unused-vars
 import * as optionsView from "./optionsView.js";
 import * as settings from "../settings.js";
+import { sendMessage } from "../communicate.js";
 
 const { useState, useEffect, useRef } = React;
 const optionsContainer = document.getElementById("options-container");
@@ -26,6 +27,8 @@ window.onhashchange = () => {
     tab = optionsView.TABS.ROUTINES;
   } else if (location.hash === "#general") {
     tab = optionsView.TABS.GENERAL;
+  } else if (location.hash === "#history") {
+    tab = optionsView.TABS.HISTORY;
   }
 
   onTabChange(tab);
@@ -34,9 +37,34 @@ window.onhashchange = () => {
 window.onload = () => {
   if (location.hash === "#routines") {
     DEFAULT_TAB = optionsView.TABS.ROUTINES;
+  } else if (location.hash === "#history") {
+    DEFAULT_TAB = optionsView.TABS.HISTORY;
   }
   onTabChange(DEFAULT_TAB);
 };
+
+async function getAudioInputDevices() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+    return null;
+  }
+  const audioInputDevices = [];
+
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  devices.forEach(function(device) {
+    if (device.kind === "audioinput") {
+      audioInputDevices.push(device);
+    }
+  });
+  return audioInputDevices;
+}
+
+function getSynthesizedVoices() {
+  if (!window.speechSynthesis || !window.speechSynthesis.getVoices) {
+    return null;
+  }
+  const voices = window.speechSynthesis.getVoices();
+  return voices;
+}
 
 export const OptionsController = function() {
   const [inDevelopment, setInDevelopment] = useState(false);
@@ -47,10 +75,80 @@ export const OptionsController = function() {
   const [userSettings, setUserSettings] = useState({});
   const [userOptions, setUserOptions] = useState({});
   const [tabValue, setTabValue] = useState(DEFAULT_TAB);
-  const [registeredNicknames, setRegisteredNicknames] = useState({});
+  const [registeredRoutines, setRegisteredRoutines] = useState({});
+
+  const [audioInputDevices, setAudioInputDevices] = useState([]);
+  const [synthesizedVoices, setSynthesizedVoices] = useState([]);
 
   onKeyboardShortcutError = setKeyboardShortcutError;
   onTabChange = setTabValue;
+
+  const inputLocales = [
+    {
+      name: "English (Australia)",
+      code: "en-AU",
+    },
+    {
+      name: "English (Canada)",
+      code: "en-CA",
+    },
+    {
+      name: "English (Ghana)",
+      code: "en-GH",
+    },
+    {
+      name: "English (Hong Kong)",
+      code: "en-HK",
+    },
+    {
+      name: "English (India)",
+      code: "en-IN",
+    },
+    {
+      name: "English (Ireland)",
+      code: "en-IE",
+    },
+    {
+      name: "English (Kenya)",
+      code: "en-KE",
+    },
+    {
+      name: "English (New Zealand)",
+      code: "en-NZ",
+    },
+    {
+      name: "English (Nigeria)",
+      code: "en-NG",
+    },
+    {
+      name: "English (Pakistan)",
+      code: "en-PK",
+    },
+    {
+      name: "English (Philippines)",
+      code: "en-PH",
+    },
+    {
+      name: "English (Singapore)",
+      code: "en-SG",
+    },
+    {
+      name: "English (South Africa)",
+      code: "en-ZA",
+    },
+    {
+      name: "English (Tanzania)",
+      code: "en-TZ",
+    },
+    {
+      name: "English (United Kingdom)",
+      code: "en-GB",
+    },
+    {
+      name: "English (United States)",
+      code: "en-US",
+    },
+  ];
 
   useEffect(() => {
     if (!isInitialized) {
@@ -62,12 +160,22 @@ export const OptionsController = function() {
   const init = async () => {
     await initVersionInfo();
     await initSettings();
-    await initRegisteredNicknames();
+    await initRegisteredRoutines();
+    await initAudioDevices();
+    initSynthesizedVoices();
+  };
+
+  const initAudioDevices = async () => {
+    setAudioInputDevices(await getAudioInputDevices());
+  };
+
+  const initSynthesizedVoices = () => {
+    setSynthesizedVoices(getSynthesizedVoices());
   };
 
   const initVersionInfo = async () => {
     setInDevelopment(
-      await browser.runtime.sendMessage({
+      await sendMessage({
         type: "inDevelopment",
       })
     );
@@ -80,12 +188,11 @@ export const OptionsController = function() {
     setUserOptions(result.options);
   };
 
-  const initRegisteredNicknames = async () => {
-    const registeredNicknames = await browser.runtime.sendMessage({
-      type: "getRegisteredNicknames",
+  const initRegisteredRoutines = async () => {
+    const registeredRoutines = await sendMessage({
+      type: "getRegisteredRoutines",
     });
-
-    setRegisteredNicknames(registeredNicknames);
+    setRegisteredRoutines(registeredRoutines);
   };
 
   const updateUserSettings = async userSettings => {
@@ -93,21 +200,24 @@ export const OptionsController = function() {
     setUserSettings(userSettings);
   };
 
-  const updateNickname = async (nicknameContext, oldNickname) => {
-    const registeredNicknames = await browser.runtime.sendMessage({
-      type: "getRegisteredNicknames",
+  const updateRoutine = async (routineContext, oldRoutine) => {
+    const registeredRoutines = await sendMessage({
+      type: "getRegisteredRoutines",
     });
 
-    if (nicknameContext !== undefined) {
+    if (routineContext !== undefined) {
       if (
-        registeredNicknames[nicknameContext.nickname] !== undefined &&
-        (oldNickname === undefined || oldNickname !== nicknameContext.nickname)
+        registeredRoutines[routineContext.routine] !== undefined &&
+        (oldRoutine === undefined || oldRoutine !== routineContext.routine)
       ) {
         log.error("There already is a routine with this name");
-        return false;
+        return {
+          allowed: false,
+          error: "There already is a routine with this name",
+        };
       }
       const contexts = [];
-      const intents = nicknameContext.intents.split("\n");
+      const intents = routineContext.intents.split("\n");
 
       for (let i = 0; i < intents.length; i++) {
         const intent = intents[i].trim();
@@ -117,7 +227,10 @@ export const OptionsController = function() {
         const context = await parseUtterance(intent);
         if (context === undefined || context.utterance === undefined) {
           log.error(`The intent number ${i} is not a valid intent`);
-          return false;
+          return {
+            allowed: false,
+            error: `The intent number ${i + 1} is not a valid intent`,
+          };
         }
 
         contexts.push(context);
@@ -125,41 +238,39 @@ export const OptionsController = function() {
 
       if (contexts.length === 0) {
         log.error("No actions added for this routine");
-        return false;
+        return { allowed: false, error: "No actions added for this routine" };
       }
-      delete nicknameContext.intents;
-      nicknameContext.contexts = contexts;
-
-      await browser.runtime.sendMessage({
-        type: "registerNickname",
-        name: nicknameContext.nickname,
+      delete routineContext.intents;
+      routineContext.contexts = contexts;
+      await sendMessage({
+        type: "registerRoutine",
+        name: routineContext.routine,
         context: {
           slots: {},
           parameters: {},
-          ...nicknameContext,
-          utterance: `Combined actions named ${nicknameContext.nickname}`,
+          ...routineContext,
+          utterance: `Combined actions named ${routineContext.routine}`,
         },
       });
-      // perform the same operation on local nickname
-      registeredNicknames[nicknameContext.nickname] = nicknameContext;
+      // perform the same operation on local routine
+      registeredRoutines[routineContext.routine] = routineContext;
     }
     // delete if necessary
     if (
-      oldNickname !== undefined &&
-      (nicknameContext === undefined ||
-        oldNickname !== nicknameContext.nickname)
+      oldRoutine !== undefined &&
+      (routineContext === undefined || oldRoutine !== routineContext.routine)
     ) {
-      await browser.runtime.sendMessage({
-        type: "registerNickname",
-        name: oldNickname,
+      await sendMessage({
+        type: "registerRoutine",
+        name: oldRoutine,
         context: null,
       });
-      // perform the same operation on local nickname
-      delete registeredNicknames[oldNickname];
+      // perform the same operation on local routine
+      delete registeredRoutines[oldRoutine];
     }
 
-    setRegisteredNicknames(registeredNicknames);
-    return true;
+    setRegisteredRoutines(registeredRoutines);
+    return { allowed: true };
   };
 
   const useToggle = initialIsVisible => {
@@ -190,18 +301,19 @@ export const OptionsController = function() {
   };
 
   const parseUtterance = async utterance => {
-    return browser.runtime.sendMessage({
+    return sendMessage({
       type: "parseUtterance",
       utterance,
-      disableFallback: true,
+      disableFallback: false,
     });
   };
 
-  const useEditNicknameDraft = (initialIsVisible, initialContext) => {
+  const useEditRoutineDraft = (initialIsVisible, initialContext) => {
     const { ref, isVisible, setVisible } = useToggle(initialIsVisible);
-    const [tempEditableNickname, setTempEditableNickname] = useState({});
-    const copyNickname = {
-      ...tempEditableNickname,
+    const [tempEditableRoutine, setTempEditableRoutine] = useState({});
+    const [errorMessage, setErrorMessage] = useState("");
+    const copyRoutine = {
+      ...tempEditableRoutine,
     };
 
     const setDraftVisibile = visible => {
@@ -211,13 +323,13 @@ export const OptionsController = function() {
       }
       const copyInitialContext = JSON.parse(JSON.stringify(initialContext));
       let intents = "";
-      // deep copy inital context and use that as temporary nickname for edit
+      // deep copy inital context and use that as temporary routine for edit
       for (let i = 0; i < initialContext.contexts.length; i++) {
         intents += initialContext.contexts[i].utterance + "\n";
       }
       copyInitialContext.intents = intents;
 
-      setTempEditableNickname(copyInitialContext);
+      setTempEditableRoutine(copyInitialContext);
       setVisible(visible);
     };
 
@@ -225,8 +337,10 @@ export const OptionsController = function() {
       ref,
       isVisible,
       setVisible: setDraftVisibile,
-      tempEditableNickname: copyNickname,
-      setTempEditableNickname,
+      tempEditableRoutine: copyRoutine,
+      setTempEditableRoutine,
+      errorMessage,
+      setErrorMessage,
     };
   };
 
@@ -239,10 +353,13 @@ export const OptionsController = function() {
       userSettings={{ ...userSettings }}
       updateUserSettings={updateUserSettings}
       tabValue={tabValue}
-      updateNickname={updateNickname}
-      registeredNicknames={registeredNicknames}
+      updateRoutine={updateRoutine}
+      registeredRoutines={registeredRoutines}
       useToggle={useToggle}
-      useEditNicknameDraft={useEditNicknameDraft}
+      useEditRoutineDraft={useEditRoutineDraft}
+      audioInputDevices={audioInputDevices}
+      synthesizedVoices={synthesizedVoices}
+      inputLocales={inputLocales}
     />
   );
 };

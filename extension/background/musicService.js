@@ -1,14 +1,15 @@
 import * as serviceList from "./serviceList.js";
 import * as content from "./content.js";
 import { shouldDisplayWarning } from "../limiter.js";
+import * as browserUtil from "../browserUtil.js";
 
 class MusicService extends serviceList.Service {
   async tabActivation() {
     if (this.tabCreated) {
       const isAudible = await this.pollTabAudible(this.tab.id, 3000);
       if (!isAudible) {
-        const activeTabId = (await this.context.activeTab()).id;
-        this.context.makeTabActive(this.tab);
+        const activeTabId = (await browserUtil.activeTab()).id;
+        browserUtil.makeTabActive(this.tab);
         const nowAudible = await this.pollTabAudible(this.tab.id, 1000);
         if (
           nowAudible ||
@@ -18,7 +19,7 @@ class MusicService extends serviceList.Service {
           }))
         ) {
           if (this.tab.id !== activeTabId) {
-            this.context.makeTabActive(activeTabId);
+            browserUtil.makeTabActive(activeTabId);
           }
         } else {
           this.context.failedAutoplay(this.tab);
@@ -29,13 +30,15 @@ class MusicService extends serviceList.Service {
 
   async playQuery(query) {
     try {
-      await this.initTab(`/services/${this.id}/player.js`);
+      await this.initTab(`/services/${this.id}/player.content.js`);
       try {
         await this.callTab("search", { query, thenPlay: true });
         await this.tabActivation();
       } catch (e) {
         if (e.message.includes("No search results")) {
           e.displayMessage = `No results found for ${query}`;
+        } else if (e.message.includes("Timeout during search")) {
+          e.displayMessage = `Encountered slow internet`;
         }
         throw e;
       }
@@ -55,29 +58,29 @@ class MusicService extends serviceList.Service {
       throw e;
     }
     for (const tab of tabs) {
-      await content.lazyInject(tab.id, `/services/${this.id}/player.js`);
+      await content.inject(tab.id, `/services/${this.id}/player.content.js`);
       await this.callOneTab(tab.id, "move", { direction });
     }
   }
 
   async pause() {
-    await this.initTab(`/services/${this.id}/player.js`);
+    await this.initTab(`/services/${this.id}/player.content.js`);
     await this.callTab("pause");
   }
 
   async unpause() {
-    await this.initTab(`/services/${this.id}/player.js`);
+    await this.initTab(`/services/${this.id}/player.content.js`);
     await this.callTab("unpause");
   }
 
   async playAlbum(query) {
-    await this.initTab(`/services/${this.id}/player.js`);
+    await this.initTab(`/services/${this.id}/player.content.js`);
     await this.callTab("playAlbum", { query, thenPlay: true });
     await this.tabActivation();
   }
 
   async playPlaylist(query) {
-    await this.initTab(`/services/${this.id}/player.js`);
+    await this.initTab(`/services/${this.id}/player.content.js`);
     await this.callTab("playPlaylist", { query, thenPlay: true });
     await this.tabActivation();
   }
@@ -88,23 +91,27 @@ class MusicService extends serviceList.Service {
       if (exceptTabId && exceptTabId === tab.id) {
         continue;
       }
-      await content.lazyInject(tab.id, `/services/${this.id}/player.js`);
+      await content.inject(tab.id, `/services/${this.id}/player.content.js`);
       await this.callOneTab(tab.id, "pause");
     }
   }
 
-  async adjustVolume(volumeLevel) {
-    await this.initTab(`/services/${this.id}/player.js`);
-    await this.callTab("adjustVolume", { volumeLevel });
+  async adjustVolume(inputVolume, volumeLevel) {
+    const findAudibleTab = true;
+    await this.initTab(
+      `/services/${this.id}/player.content.js`,
+      findAudibleTab
+    );
+    await this.callTab("adjustVolume", { inputVolume, volumeLevel });
   }
 
   async mute() {
-    await this.initTab(`/services/${this.id}/player.js`);
+    await this.initTab(`/services/${this.id}/player.content.js`);
     await this.callTab("mute");
   }
 
   async unmute() {
-    await this.initTab(`/services/${this.id}/player.js`);
+    await this.initTab(`/services/${this.id}/player.content.js`);
     await this.callTab("unmute");
   }
 }

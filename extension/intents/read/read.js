@@ -16,7 +16,7 @@ export async function stopReading() {
 }
 
 async function stopReadingTab(tabId) {
-  await content.lazyInject(tabId, ["/intents/read/startNarration.js"]);
+  await content.inject(tabId, "/intents/read/startNarration.content.js");
   await browser.tabs.sendMessage(tabId, {
     type: "stopReading",
   });
@@ -44,13 +44,16 @@ intentRunner.registerIntent({
     let activeTab;
     const query = context.slots.query;
     if (!query) {
-      activeTab = await context.activeTab();
+      activeTab = await browserUtil.activeTab();
     } else {
-      activeTab = await context.createTabGoogleLucky(query);
+      activeTab = await browserUtil.createTabGoogleLucky(query);
       await browserUtil.waitForDocumentComplete(activeTab.id);
     }
     await browserUtil.turnOnReaderMode(activeTab.id);
-    await content.lazyInject(activeTab.id, ["/intents/read/startNarration.js"]);
+    await content.inject(
+      activeTab.id,
+      "/intents/read/startNarration.content.js"
+    );
     const success = await browser.tabs.sendMessage(activeTab.id, {
       type: "narrate",
     });
@@ -65,15 +68,66 @@ intentRunner.registerIntent({
 intentRunner.registerIntent({
   name: "read.stopRead",
   async run(context) {
-    const activeTab = await context.activeTab();
+    const activeTab = await browserUtil.activeTab();
     if (!activeTab.url.startsWith("about:reader")) {
       const e = new Error(`Not a Reader Mode page`);
       e.displayMessage = "Page isn't narrating";
       throw e;
     }
-    await content.lazyInject(activeTab.id, ["/intents/read/startNarration.js"]);
+    await content.inject(
+      activeTab.id,
+      "/intents/read/startNarration.content.js"
+    );
     const success = await browser.tabs.sendMessage(activeTab.id, {
       type: "stopReading",
+    });
+    if (!success) {
+      const e = new Error("Not narrating");
+      e.displayMessage = "Page isn't narrating";
+      throw e;
+    }
+  },
+});
+
+intentRunner.registerIntent({
+  name: "read.forwardRead",
+  async run(context) {
+    const activeTab = await browserUtil.activeTab();
+    if (!activeTab.url.startsWith("about:reader")) {
+      const e = new Error(`Not a Reader Mode page`);
+      e.displayMessage = "Page isn't narrating";
+      throw e;
+    }
+    await content.inject(
+      activeTab.id,
+      "/intents/read/startNarration.content.js"
+    );
+    const success = await browser.tabs.sendMessage(activeTab.id, {
+      type: "forward",
+    });
+    if (!success) {
+      const e = new Error("Not narrating");
+      e.displayMessage = "Page isn't narrating";
+      throw e;
+    }
+  },
+});
+
+intentRunner.registerIntent({
+  name: "read.backwardRead",
+  async run(context) {
+    const activeTab = await browserUtil.activeTab();
+    if (!activeTab.url.startsWith("about:reader")) {
+      const e = new Error(`Not a Reader Mode page`);
+      e.displayMessage = "Page isn't narrating";
+      throw e;
+    }
+    await content.inject(
+      activeTab.id,
+      "/intents/read/startNarration.content.js"
+    );
+    const success = await browser.tabs.sendMessage(activeTab.id, {
+      type: "backward",
     });
     if (!success) {
       const e = new Error("Not narrating");

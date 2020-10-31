@@ -1,10 +1,11 @@
-/* globals lottie, React */
+/* globals lottie, buildSettings, React */
 /* eslint-disable no-unused-vars */
 // For some reason, eslint is not detecting that <Variable /> means that Variable is used
 
 import * as browserUtil from "../browserUtil.js";
+import { getSettingsAndOptions } from "../settings.js";
 
-const { Component, useState, useEffect, PureComponent } = React;
+const { useState, useEffect, PureComponent } = React;
 
 export const Popup = ({
   currentView,
@@ -29,8 +30,57 @@ export const Popup = ({
   expandListeningView,
   timerInMS,
   timerTotalInMS,
+  renderFollowup,
+  followupText,
+  showZeroVolumeError,
+  userSettings,
+  updateUserSettings,
+  showSurvey,
+  onClickSurvey,
 }) => {
   const [inputValue, setInputValue] = useState(null);
+  const [showScroll, setShowScroll] = useState(false);
+  const [userOptions, setUserOptions] = useState({});
+
+  // This would lead to an infinite loop if showing the scroll effected the height, which
+  // caused this to toggle showScroll back and forth infinitely. But it won't change the
+  // height so it's okay.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const doc = document.body;
+    if (doc.offsetHeight > window.innerHeight) {
+      if (!showScroll) {
+        setShowScroll(true);
+      }
+    } else if (
+      window.innerHeight > doc.offsetHeight ||
+      window.innerHeight === doc.offsetHeight
+    ) {
+      if (showScroll) {
+        setShowScroll(false);
+      }
+    }
+  });
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    const result = await getSettingsAndOptions();
+    setUserOptions(result.options);
+  };
+
+  const scrollDown = () => {
+    let footerHeight = 0;
+    const footer = document.querySelector("#search-footer");
+    if (footer) {
+      footerHeight = footer.clientHeight;
+    }
+    const scrollAmount = window.innerHeight - footerHeight - 15;
+    window.scrollBy(0, scrollAmount);
+  };
+
   function savingOnInputStarted(value) {
     // When the user types in the hidden field, we need to keep that
     // first input and use it later
@@ -38,7 +88,17 @@ export const Popup = ({
     onInputStarted();
   }
   return (
-    <div id="popup" className={currentView}>
+    <div
+      id="popup"
+      className={`${currentView} ${renderFollowup ? "followup" : ""}`}
+    >
+      <button
+        className="scroll-down"
+        onClick={scrollDown}
+        style={{ height: "2rem", display: showScroll ? "flex" : "none" }}
+      >
+        <img src="images/arrow_down.svg" alt="scroll to bottom" />
+      </button>
       <PopupHeader
         currentView={currentView}
         transcript={transcript}
@@ -66,10 +126,17 @@ export const Popup = ({
         expandListeningView={expandListeningView}
         timerInMS={timerInMS}
         timerTotalInMS={timerTotalInMS}
+        renderFollowup={renderFollowup}
+        showZeroVolumeError={showZeroVolumeError}
+        userOptions={userOptions}
+        userSettings={userSettings}
+        updateUserSettings={updateUserSettings}
       />
       <PopupFooter
         currentView={currentView}
         showSettings={showSettings}
+        showSurvey={showSurvey}
+        onClickSurvey={onClickSurvey}
         timerInMS={timerInMS}
       />
       {timerInMS > 0 ? (
@@ -78,6 +145,13 @@ export const Popup = ({
           timerInMS={timerInMS}
         ></TimerFooter>
       ) : null}
+      <FollowupContainer
+        lastIntent={lastIntent}
+        followupText={followupText}
+        renderFollowup={renderFollowup}
+        currentView={currentView}
+        onSubmitFeedback={onSubmitFeedback}
+      />
     </div>
   );
 };
@@ -103,7 +177,7 @@ const PopupHeader = ({ currentView, transcript, lastIntent }) => {
         return (
           <React.Fragment>
             <p>{lastIntentTime(lastIntent)} ago you said</p>
-            <p className="utterance">{lastIntent.utterance}</p>
+            <p className="utterance">{lastIntent && lastIntent.utterance}</p>
           </React.Fragment>
         );
       case "feedbackThanks":
@@ -112,6 +186,8 @@ const PopupHeader = ({ currentView, transcript, lastIntent }) => {
         return "One moment...";
       case "timer":
         return transcript;
+      case "noAudio":
+        return "Oops...";
       case "listening":
       default:
         return "Listening";
@@ -195,6 +271,11 @@ const PopupContent = ({
   expandListeningView,
   timerInMS,
   timerTotalInMS,
+  renderFollowup,
+  showZeroVolumeError,
+  userOptions,
+  userSettings,
+  updateUserSettings,
 }) => {
   const getContent = () => {
     switch (currentView) {
@@ -206,6 +287,7 @@ const PopupContent = ({
             onClickLexicon={onClickLexicon}
             onInputStarted={onInputStarted}
             expandListeningView={expandListeningView}
+            showZeroVolumeError={showZeroVolumeError}
           />
         );
       case "typing":
@@ -221,6 +303,7 @@ const PopupContent = ({
           <ProcessingContent
             transcript={transcript}
             displayText={displayText}
+            renderFollowup={renderFollowup}
           />
         );
       case "success":
@@ -235,6 +318,8 @@ const PopupContent = ({
             displayAutoplay={displayAutoplay}
           />
         );
+      case "noAudio":
+        return <NoAudioContent displayText={displayText} />;
       case "searchResults":
         return (
           <SearchResultsContent
@@ -245,6 +330,10 @@ const PopupContent = ({
             onNextSearchResultClick={onNextSearchResultClick}
             setMinPopupSize={setMinPopupSize}
             onSubmitFeedback={onSubmitFeedback}
+            renderFollowup={renderFollowup}
+            userOptions={userOptions}
+            userSettings={userSettings}
+            updateUserSettings={updateUserSettings}
           />
         );
       case "startSavingPage":
@@ -264,8 +353,15 @@ const PopupContent = ({
           <TimerCard
             timerInMS={timerInMS}
             timerTotalInMS={timerTotalInMS}
-            onSubmitFeedback={onSubmitFeedback}
           ></TimerCard>
+        );
+      case "fallback":
+        return (
+          <FallbackContent
+            displayText={displayText}
+            errorMessage={errorMessage}
+            onSubmitFeedback={onSubmitFeedback}
+          />
         );
       default:
         return null;
@@ -276,6 +372,60 @@ const PopupContent = ({
     <div id="popup-content">
       <Zap currentView={currentView} recorderVolume={recorderVolume} />
       {getContent()}
+    </div>
+  );
+};
+
+const FallbackContent = ({ displayText, errorMessage, onSubmitFeedback }) => {
+  return (
+    <div>
+      <TextDisplay displayText={displayText} />
+      {errorMessage ? <div id="error-message">{errorMessage}</div> : null}
+      <IntentFeedback onSubmitFeedback={onSubmitFeedback} />
+    </div>
+  );
+};
+
+const FollowupContainer = ({
+  followupText,
+  renderFollowup,
+  currentView,
+  onSubmitFeedback,
+}) => {
+  if (
+    currentView === "listening" ||
+    currentView === "waiting" ||
+    currentView === "processing" ||
+    !renderFollowup
+  ) {
+    return null;
+  }
+
+  let heading = "Waiting...";
+  let subheading;
+  if (followupText) {
+    heading = followupText.heading;
+    subheading = followupText.subheading;
+  }
+  return (
+    <div id="followup-container">
+      <IntentFeedback onSubmitFeedback={onSubmitFeedback} />
+      <FollowUpWrapper
+        heading={heading}
+        subheading={subheading}
+      ></FollowUpWrapper>
+    </div>
+  );
+};
+
+const FollowUpWrapper = ({ heading, subheading }) => {
+  return (
+    <div id="followup-wrapper">
+      <div id="followup_mic-container">Mic On</div>
+      <div id="followup_headings-wrapper">
+        <div id="followup_heading">{heading}</div>
+        {subheading && <div id="followup_subheading">{subheading}</div>}
+      </div>
     </div>
   );
 };
@@ -327,12 +477,18 @@ const FeedbackThanks = () => {
   );
 };
 
-const PopupFooter = ({ currentView, showSettings, timerInMS }) => {
+const PopupFooter = ({
+  currentView,
+  showSettings,
+  showSurvey,
+  onClickSurvey,
+}) => {
   if (
     currentView === "searchResults" ||
     currentView === "feedback" ||
     currentView === "feedbackThanks" ||
-    currentView === "timer"
+    currentView === "timer" ||
+    currentView === "fallback"
   )
     return null;
   return (
@@ -351,16 +507,39 @@ const PopupFooter = ({ currentView, showSettings, timerInMS }) => {
         </svg>
       </button>
       <div id="moz-voice-privacy">
-        <a
-          href="https://firefox-voice-feedback.herokuapp.com/"
-          target="_blank"
-          rel="noopener"
-        >
-          Feedback?
-        </a>
+        {showSurvey ? (
+          <SurveyLink onClickSurvey={onClickSurvey} />
+        ) : (
+          <FeedbackLink />
+        )}
       </div>
       <div></div>
     </div>
+  );
+};
+
+const FeedbackLink = () => {
+  return (
+    <a
+      href="https://firefox-voice-feedback.herokuapp.com/"
+      target="_blank"
+      rel="noopener"
+    >
+      Feedback?
+    </a>
+  );
+};
+
+const SurveyLink = ({ onClickSurvey }) => {
+  return (
+    <a
+      href="https://qsurvey.mozilla.com/s3/voice-feedback"
+      target="_blank"
+      rel="noopener"
+      onClick={onClickSurvey}
+    >
+      Take a survey?
+    </a>
   );
 };
 
@@ -383,26 +562,29 @@ const parseTimer = timerInMS => {
   return pad(minutes, 2) + ":" + pad(seconds, 2);
 };
 
-const TimerCard = ({ timerInMS, timerTotalInMS, onSubmitFeedback }) => {
+const TimerCard = ({ timerInMS, timerTotalInMS }) => {
   const getNotificationExpression = timerTotalInMS => {
     const { hours, minutes, seconds } = getHourMinuteSecond(timerTotalInMS);
     let expression = "";
 
     if (hours !== 0) {
-      expression += `${hours} hours`;
+      const timeUnit = hours === 1 ? "hour" : "hours";
+      expression += `${hours} ${timeUnit}`;
     }
     if (minutes !== 0) {
       if (expression.length > 0) {
         expression += " and ";
       }
-      expression += `${minutes} minutes`;
+      const timeUnit = minutes === 1 ? "minute" : "minutes";
+      expression += `${minutes} ${timeUnit}`;
     }
 
     if (seconds !== 0) {
       if (expression.length > 0) {
         expression += " and ";
       }
-      expression += `${seconds} seconds`;
+      const timeUnit = seconds === 1 ? "second" : "seconds";
+      expression += `${seconds} ${timeUnit}`;
     }
     return `It's been ${expression}`;
   };
@@ -418,7 +600,6 @@ const TimerCard = ({ timerInMS, timerTotalInMS, onSubmitFeedback }) => {
           {timerInMS <= 0 ? <p>{notificationExpression}</p> : null}
         </div>
       </div>
-      <IntentFeedback onSubmitFeedback={onSubmitFeedback} />
     </React.Fragment>
   );
 };
@@ -450,12 +631,18 @@ const ListeningContent = ({
   onClickLexicon,
   onInputStarted,
   expandListeningView,
+  showZeroVolumeError,
 }) => {
   return (
     <React.Fragment>
       <TextDisplay displayText={displayText} />
       <div id="extra-content" className={expandListeningView ? "expanded" : ""}>
-        <VoiceInput suggestions={suggestions} onClickLexicon={onClickLexicon} />
+        <VoiceInput
+          suggestions={suggestions}
+          onClickLexicon={onClickLexicon}
+          onInputStarted={onInputStarted}
+          showZeroVolumeError={showZeroVolumeError}
+        />
         <TypingInput onInputStarted={onInputStarted} />
       </div>
     </React.Fragment>
@@ -471,7 +658,12 @@ const TypingContent = ({ displayText, submitTextInput, inputValue }) => {
   );
 };
 
-const VoiceInput = ({ suggestions, onClickLexicon }) => {
+const VoiceInput = ({
+  suggestions,
+  onClickLexicon,
+  onInputStarted,
+  showZeroVolumeError,
+}) => {
   const onMoreSuggestions = event => {
     if (event) {
       event.preventDefault();
@@ -482,6 +674,22 @@ const VoiceInput = ({ suggestions, onClickLexicon }) => {
     <div id="voice-input">
       {suggestions ? (
         <div id="suggestions">
+          {buildSettings.inDevelopment ? (
+            <div>
+              <p>Developer tip:</p>
+              <button
+                className="type-input-button"
+                onClick={() => onInputStarted("")}
+              >
+                Start typing to make a request using a keyboard
+              </button>
+            </div>
+          ) : null}
+          {showZeroVolumeError ? (
+            <p className="mic-text">
+              Microphone is not working. Firefox may need to be restarted.
+            </p>
+          ) : null}
           <p id="prompt">You can say things like:</p>
           <div id="suggestions-list">
             {suggestions.map(suggestion => (
@@ -541,10 +749,15 @@ const IntentFeedback = ({ eduText, onSubmitFeedback }) => {
 
 const lastIntentTime = lastIntent => {
   let ago;
-  const minutesAgo = Math.max(
-    1,
-    Math.round((Date.now() - lastIntent.timestamp) / 60000)
-  );
+  let minutesAgo;
+  if (!lastIntent) {
+    minutesAgo = 1;
+  } else {
+    minutesAgo = Math.max(
+      1,
+      Math.round((Date.now() - lastIntent.timestamp) / 60000)
+    );
+  }
   if (minutesAgo > 60) {
     const hoursAgo = Math.round(minutesAgo / 60);
     const plural = hoursAgo === 1 ? "" : "s";
@@ -627,11 +840,11 @@ class TypingInput extends PureComponent {
   }
 }
 
-const ProcessingContent = ({ transcript, displayText }) => {
+const ProcessingContent = ({ transcript, displayText, renderFollowup }) => {
   return (
     <React.Fragment>
-      <Transcript transcript={transcript} />
-      <TextDisplay displayText={displayText} />
+      <Transcript transcript={renderFollowup ? "" : transcript} />
+      <TextDisplay displayText={renderFollowup ? "" : displayText} />
     </React.Fragment>
   );
 };
@@ -662,6 +875,16 @@ const ErrorContent = ({ displayText, errorMessage, displayAutoplay }) => {
   );
 };
 
+const NoAudioContent = ({ displayText }) => {
+  return (
+    <div id="no-audio">
+      <React.Fragment>
+        <TextDisplay displayText={displayText} />
+      </React.Fragment>
+    </div>
+  );
+};
+
 const SavingPageContent = ({ transcript }) => {
   return (
     <React.Fragment>
@@ -678,6 +901,10 @@ const SearchResultsContent = ({
   onNextSearchResultClick,
   setMinPopupSize,
   onSubmitFeedback,
+  renderFollowup,
+  userOptions,
+  userSettings,
+  updateUserSettings,
 }) => {
   if (!search) return null;
 
@@ -689,6 +916,7 @@ const SearchResultsContent = ({
     card && card.alt
       ? `Click to show search results: ${card.alt}`
       : "Show search results";
+  const shouldRenderCard = card ? true : !renderFollowup;
 
   if (card) {
     setMinPopupSize(card.width);
@@ -703,9 +931,15 @@ const SearchResultsContent = ({
     onNextSearchResultClick();
   };
 
+  const onMusicServiceChange = name => {
+    userSettings.musicService = name;
+    updateUserSettings(userSettings);
+  };
+
   const SearchCard = () => (
     <button class="invisible-button" onClick={onSearchCardClick}>
       <img id="search-image" alt={imgAlt} style={cardStyles} src={card.src} />
+      <div id="bottomSection"></div>
     </button>
   );
 
@@ -729,41 +963,74 @@ const SearchResultsContent = ({
     </div>
   );
 
+  const MusicSettingCard = () => {
+    return (
+      <div value={userSettings.musicService} className="results-set">
+        {userOptions.musicServices &&
+          userOptions.musicServices
+            .filter(({ name }) => name !== "auto")
+            .map(({ name, title, imgSrc }) => (
+              <button
+                key={name}
+                onClick={() => {
+                  onMusicServiceChange(name);
+                }}
+                className="music-list invisible-button"
+              >
+                <div>
+                  <img
+                    className="music-service-image"
+                    src={imgSrc}
+                    alt={name}
+                  />
+                </div>
+                <div className="results-medium-text">{title}</div>
+              </button>
+            ))}
+      </div>
+    );
+  };
+
   const renderCard = () => {
-    if (card && card.answer) {
-      return AnswerCard();
+    if (card && card.music && card.answer) {
+      return <MusicSettingCard />;
+    } else if (card && card.answer) {
+      return <AnswerCard />;
     } else if (card) {
-      return SearchCard();
+      return <SearchCard />;
     }
     return null;
   };
-
   return (
     <React.Fragment>
       <TextDisplay displayText={displayText} />
       <div id="search-results">{renderCard()}</div>
-      <div id="search-footer">
-        <IntentFeedback
-          onSubmitFeedback={onSubmitFeedback}
-          eduText={card && card.answer ? card.answer.eduText : null}
-        />
-        {next ? (
-          <div id="next-result">
-            <p>
-              <strong>
-                Click mic and say <i>'next'</i> to view
-              </strong>
-            </p>
-            <a
-              href={next.url}
-              id="search-show-next"
-              onClick={onNextResultClick}
-            >
-              {new URL(next.url).hostname} | {next.title}
-            </a>
+      {renderFollowup ? null : (
+        <React.Fragment>
+          <div id="search-footer">
+            <IntentFeedback
+              onSubmitFeedback={onSubmitFeedback}
+              eduText={card && card.answer ? card.answer.eduText : null}
+            />
+            {next ? (
+              <div id="next-result">
+                <p>
+                  <strong>
+                    Click mic and say <i>'next'</i> to view
+                  </strong>
+                </p>
+                <a
+                  href={next.url}
+                  id="search-show-next"
+                  onClick={onNextResultClick}
+                >
+                  {new URL(next.url).hostname} | {next.title}
+                </a>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </React.Fragment>
+      )}
     </React.Fragment>
   );
 };
@@ -776,7 +1043,7 @@ const TextDisplay = ({ displayText }) => {
   return displayText ? <div id="text-display">{displayText}</div> : null;
 };
 
-class Zap extends Component {
+class Zap extends PureComponent {
   constructor(props) {
     super(props);
 
@@ -830,6 +1097,16 @@ class Zap extends Component {
       },
       feedbackThanks: {
         segments: [this.animationSegmentTimes.success],
+        loop: false,
+        interrupt: true,
+      },
+      noAudio: {
+        segments: [this.animationSegmentTimes.error],
+        loop: false,
+        interrupt: true,
+      },
+      fallback: {
+        segments: [this.animationSegmentTimes.error],
         loop: false,
         interrupt: true,
       },

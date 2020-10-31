@@ -1,4 +1,7 @@
+/* globals buildSettings */
+
 import * as intentRunner from "../../background/intentRunner.js";
+import * as browserUtil from "../../browserUtil.js";
 
 function findTargetWindowId(windowArray, currentWindowId, direction) {
   const len = windowArray.length;
@@ -19,7 +22,7 @@ intentRunner.registerIntent({
   name: "window.switch",
   async run(context) {
     // get current activeTab.windowId
-    const activeTab = await context.activeTab();
+    const activeTab = await browserUtil.activeTab();
     const currentWindowId = activeTab.windowId;
     // get direction parameter
     const direction = context.parameters.direction;
@@ -48,17 +51,10 @@ intentRunner.registerIntent({
 intentRunner.registerIntent({
   name: "window.close",
   async run(context) {
-    // get current activeTab.windowId
-    const activeTab = await context.activeTab();
-    const currentWindowId = activeTab.windowId;
-    // getAll normal window
-    const gettingAll = await browser.windows.getAll({
-      windowTypes: ["normal"],
-    });
-    // find target windowId
-    const targetWindowId = findTargetWindowId(gettingAll, currentWindowId);
-    await browser.windows.remove(targetWindowId);
-    context.displayText("Window closed");
+    context.keepPopup();
+    const currentWindow = await browser.windows.getCurrent();
+    await browser.windows.remove(currentWindow.id);
+    context.presentMessage("Window closed");
   },
 });
 
@@ -76,5 +72,33 @@ intentRunner.registerIntent({
     const tabs = await browser.tabs.query({ currentWindow: false });
     const tabsIds = tabs.map(tabInfo => tabInfo.id);
     await browser.tabs.move(tabsIds, { windowId: currentWindow.id, index: -1 });
+  },
+});
+
+intentRunner.registerIntent({
+  name: "window.zoom",
+  async run(context) {
+    if (buildSettings.android) {
+      const exc = new Error("Maximize not supported on Android");
+      exc.displayMessage = exc.message;
+      throw exc;
+    }
+    const currentWindow = await browser.windows.getCurrent();
+    await browser.windows.update(currentWindow.id, { state: "maximized" });
+  },
+});
+
+intentRunner.registerIntent({
+  name: "window.minimize",
+  async run(context) {
+    const currentWindow = await browser.windows.getCurrent();
+    await browser.windows.update(currentWindow.id, { state: "minimized" });
+  },
+});
+
+intentRunner.registerIntent({
+  name: "window.clearBrowserHistory",
+  async run(context) {
+    await browser.experiments.voice.clearBrowserHistory();
   },
 });

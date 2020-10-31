@@ -1,6 +1,6 @@
-**Outreachy applicants:** please try to get all _new_ PRs submitted by Friday,
-April 3rd. After that we'll be trying to review all PRs and respond to 
-followups. Earlier is better, as the review load is very high.
+**Warning:** this team behind this project was part of the August 11th 2020 Mozilla layoffs, and while we're still determining the exact next steps, we don't believe this project will continue.
+
+----
 
 Before submitting a final PR, please:
 

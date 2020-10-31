@@ -1,8 +1,28 @@
 # Firefox Voice
 
-Firefox Voice is an experiment from [Mozilla Emerging Technologies](https://research.mozilla.org/).
+## Status
+
+Mozilla has [realigned its priorities](https://blog.mozilla.org/blog/2020/08/11/changing-world-changing-mozilla/), and Firefox Voice will no longer be supported by Mozilla. The Firefox Voice team will be going to new things, no longer with Mozilla. This has been a fun and exciting project and we appreciate all the contributions and ideas we’ve received from the community.
+
+The repository will remain here, but archived. We believe the extension will be available for a few months but expect it will be removed from addons.mozilla.org eventually.
+
+Thanks from the team – [Ian Bicking](https://www.ianbicking.org/), [Julia Cambre](https://juliacambre.com/), [Jofish Kaye](http://jofish.com/), [Daniela Mormocea](https://github.com/danielamormocea), [Chioma Onyekpere](https://github.com/Simpcyclassy), [Afsaneh Razi](http://www.afsanehrazi.com/), [Janice Tsai](http://www.harraton.com/), [Abraham Wallin](https://abewallin.com/).
+
+## About
+
+Firefox Voice was an experiment from [Mozilla Emerging Technologies](https://research.mozilla.org/).
 
 Firefox Voice is a browser extension that allows you to give voice commands to your browser, such as "What is the weather?" or "Find the gmail tab". Initially, the goal is to provide _any_ useful interactions. Ultimately, the goal is to see if we can facilitate meaningful user interactions with the web using just voice-based interactions.
+
+## What does it do?
+
+Check out these videos:
+
+[![Speech-based Firefox Voice demonstration](https://img.youtube.com/vi/bF9UYIv-9oI/0.jpg)](https://www.youtube.com/watch?v=bF9UYIv-9oI)
+
+[![No-speech Firefox Voice demonstration](https://img.youtube.com/vi/pg7Wtjn2bIE/0.jpg)](https://www.youtube.com/watch?v=pg7Wtjn2bIE)
+
+## About
 
 ## Launcher Usage
 
@@ -62,8 +82,8 @@ By default this will use Firefox Nightly, but you can override this with the env
    This command does the following:
    - Compiles JavaScript
    - Runs all tests
-   - Checks the code formatting using `prettier`[https://prettier.io/]
-   - Lints the code using `eslint` [https://github.com/eslint/eslint]
+   - Checks the code formatting using [`prettier`](https://prettier.io/)
+   - Lints the code using [`eslint`](https://github.com/eslint/eslint)
 2. While `firefox-voice` makes use of `jest`, it has been excluded from continuous integration (CI) because CI couldn't handle the module rewrites.
 3. `npm test` runs `npm run jest` locally on `node v13.8.0` in the development process.
 4. New `jest` unit tests can be added because `npm test` still runs `jest` locally. For examples to guide you, refer to files with the `.test.js` extension.
@@ -79,7 +99,7 @@ By default this will use Firefox Nightly, but you can override this with the env
 In Firefox Voice there are several separate processes where things run (see also [Anatomy of an extension](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Anatomy_of_a_WebExtension)):
 
 1. The "background page". This is a persistent page that belongs to the extension, and is where most of the work is done. For debugging this specifically see [this `about:debugging` document](https://developer.mozilla.org/en-US/docs/Tools/about:debugging).
-2. The popup. This is it's own page (in `extension/popup/`) and handles some of the initial lifecycle of invoking an intent. In most ways it is a normal page, but it runs in the short-lived popup. See the next section for a technique to debug this.
+2. The popup. This is its own page (in `extension/popup/`) and handles some of the initial lifecycle of invoking an intent. In most ways it is a normal page, but it runs in the short-lived popup. See the next section for a technique to debug this.
 3. The recorder tab. This is its own pinned tab that holds the media stream (because we have to keep this open to avoid permission issues). It is its own page. You can use the normal debugging tools on it.
 4. The search tab. This is also its own pinned tab that holds Google searches. It is not long-lived (each search causes it to reload), but it is specifically managed by the extension. The extension-specific code is run in content scripts, and normal debugging tools mostly work but can be finicky.
 5. Other [content scripts](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Content_scripts). Any page that the extension manages directly (e.g., clicking controls, reading information) has content scripts injected.
@@ -109,9 +129,8 @@ It's possible to install and use in-development versions of the extension. Every
 We are using these builds for internal testing with more-than-normal data collection. We have not yet implemented data collection controls.
 
 - [Install dev version](https://va.allizom.org/releases/dev/firefox-voice.xpi?src=github)
-- [Install stage version](https://va.allizom.org/releases/stage/firefox-voice.xpi?src=github) (Note: stage isn't always updated!)
-- [Install production version](https://va.allizom.org/releases/prod/firefox-voice.xpi?src=github)
-- [Logs of updates](https://va.allizom.org/releases/public-update-log.txt)
+  (note: Use **Save As** and install it via about:debugging **Load Temporary Add-on**. Also open `about:config` and set `extensions.experiments.enabled` to true)
+- [Install release version](https://addons.mozilla.org/en-US/firefox/addon/firefox-voice/)
 
 The version numbers are increased for each release and each commit, but are _not_ sequential.
 
@@ -121,7 +140,7 @@ There is an index of intents (commands) that is viewable if you open the panel, 
 
 ## Developing in Android
 
-This is very experimental, but to develop for Firefox for Android (not Fenix), install Firefox (release) on your Android device.
+This is very experimental, but to develop for Firefox for Android, install Firefox (release) on your Android device.
 
 To try, run:
 
@@ -144,21 +163,6 @@ For some more information:
 - See the [web-ext docs](https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext#testing-in-firefox-for-android) and the section "Testing in Firefox for Android"
 - [How to get developer options on Android](https://www.digitaltrends.com/mobile/how-to-get-developer-options-on-android/) (to turn on USB access)
 
-### Demo inter-process communication for Android
-
-On Android we're experimenting with collecting voice outside Firefox and then sending the text of the command into Firefox.
-
-For demonstration purposes only, there is an option to see a URL being opened and use that as the source of an intent. To enable this, set the environmental variable `$EXECUTE_INTENT_URL` to the base URL, and use `?text=...` to pass in the text. For instance:
-
-```sh
-export EXECUTE_INTENT_URL=https://mozilla.github.io/firefox-voice/assets/execute.html
-npm run start-android
-```
-
-Then, open `https://mozilla.github.io/firefox-voice/assets/execute.html?text=open%20tab`
-
-While we may enable something similar on desktop, it will use a [different mechanism](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging).
-
 ## Contributing
 
 See the [guidelines](docs/contributing.md) for contributing to this project.
@@ -168,6 +172,8 @@ This project is governed by a [Code Of Conduct](docs/code_of_conduct.md).
 To disclose any potential security vulnerability please see our [security](docs/security.md) documentation.
 
 ### Contributors
+
+Wakeword provided by the [Howl Project](https://github.com/castorini/howl/): [Jaejun Lee](https://www.linkedin.com/in/ljj7975/), [Ralph Tang](http://ralphtang.com/), [Jimmy Lin](https://cs.uwaterloo.ca/~jimmylin/), University of Waterloo.
 
 <a href="https://github.com/mozilla/firefox-voice/graphs/contributors">
   <img src="https://contributors-img.firebaseapp.com/image?repo=mozilla/firefox-voice" />

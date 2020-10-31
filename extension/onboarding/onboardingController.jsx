@@ -9,9 +9,18 @@ const onboardingContainer = document.getElementById("onboarding-container");
 let isInitialized = false;
 let userSettings;
 
+const askForAudio = !!new URLSearchParams(location.search).get("audio");
+
 export const OnboardingController = function() {
   const [optinViewAlreadyShown, setOptinViewShown] = useState(true);
+  const [optinTechDataAlreadyShown, setOptinTechDataAlreadyShown] = useState(
+    true
+  );
   const [permissionError, setPermissionError] = useState(null);
+  const [optinWakewordAlreadyShown, setOptinWakewordAlreadyShown] = useState(
+    true
+  );
+  const [wakewordActive, setWakewordActive] = useState(false);
 
   useEffect(() => {
     if (!isInitialized) {
@@ -23,15 +32,46 @@ export const OnboardingController = function() {
   const init = async () => {
     userSettings = await settings.getSettings();
     setOptinViewShown(!!userSettings.collectTranscriptsOptinAnswered);
-
+    setOptinTechDataAlreadyShown(
+      !!userSettings.collectTranscriptsOptinAnswered
+    );
+    setOptinWakewordAlreadyShown(!!userSettings.wakewordOptinAnswered);
+    setWakewordActive(!!userSettings.enableWakeword);
     if (optinViewAlreadyShown) {
       launchPermission();
+    }
+  };
+
+  const setCollectTechData = async value => {
+    if (!value) {
+      // Opting out of tech data means opting out of everything
+      userSettings.collectTranscriptsOptinAnswered = Date.now();
+      userSettings.disableTelemetry = true;
+      setOptinTechDataAlreadyShown(true);
+      // This is true, in that we don't have to show the second opt-in view:
+      setOptinViewShown(true);
+      await settings.saveSettings(userSettings);
+    } else {
+      userSettings.disableTelemetry = false;
+      setOptinTechDataAlreadyShown(true);
+      await settings.saveSettings(userSettings);
     }
   };
 
   const setOptinValue = async value => {
     userSettings.collectTranscriptsOptinAnswered = Date.now();
     userSettings.utterancesTelemetry = value;
+    if (askForAudio) {
+      userSettings.collectAudio = value;
+    }
+    await settings.saveSettings(userSettings);
+  };
+
+  const setWakewordOptinValue = async value => {
+    userSettings.wakewordOptinAnswered = Date.now();
+    userSettings.enableWakeword = value;
+    setWakewordActive(userSettings.enableWakeword);
+    setOptinWakewordAlreadyShown(true);
     await settings.saveSettings(userSettings);
   };
 
@@ -56,9 +96,15 @@ export const OnboardingController = function() {
   return (
     <onboardingView.Onboarding
       optinViewAlreadyShown={optinViewAlreadyShown}
+      optinTechDataAlreadyShown={optinTechDataAlreadyShown}
+      askForAudio={askForAudio}
+      setCollectTechData={setCollectTechData}
       setOptinValue={setOptinValue}
       setOptinViewShown={setOptinViewShown}
       permissionError={permissionError}
+      setWakewordOptinValue={setWakewordOptinValue}
+      optinWakewordAlreadyShown={optinWakewordAlreadyShown}
+      wakewordActive={wakewordActive}
     />
   );
 };

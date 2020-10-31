@@ -5,6 +5,8 @@ import * as searching from "../../searching.js";
 import * as content from "../../background/content.js";
 import * as telemetry from "../../background/telemetry.js";
 import * as browserUtil from "../../browserUtil.js";
+import * as settings from "../../settings.js";
+import { sendMessage } from "../../communicate.js";
 
 // Close the search tab after this amount of time:
 const CLOSE_TIME = 1000 * 60 * 60; // 1 hour
@@ -36,8 +38,11 @@ async function openSearchTab() {
   }, CLOSE_TIME);
   if (_searchTabId) {
     try {
-      await browser.tabs.get(_searchTabId);
-      return _searchTabId;
+      const tab = await browser.tabs.get(_searchTabId);
+      // reuse tab only if it's hidden
+      if (tab.hidden === true) {
+        return _searchTabId;
+      }
     } catch (e) {
       // Presumably the tab doesn't exist
       log.info("Error getting tab:", String(e));
@@ -110,7 +115,61 @@ async function performSearch(query) {
   if (buildSettings.android) {
     await browserUtil.makeTabActive(tabId);
   }
-  await content.lazyInject(tabId, "/intents/search/queryScript.js");
+  try {
+    await content.inject(tabId, "/intents/search/queryScript.content.js");
+  } catch (e) {
+    // There's a (fairly) common race condition here
+    if (e.message.includes("communicate is not defined")) {
+      log.info(
+        "Race condition in search page, attempting to load queryScript second time"
+      );
+      await content.inject(tabId, "/intents/search/queryScript.content.js");
+    } else {
+      throw e;
+    }
+  }
+}
+
+export async function performSearchPage(context, query) {
+  if (!query) {
+    query = context.slots.query;
+  }
+  const tab = await browser.tabs.create({
+    url: START_URL,
+    active: false,
+  });
+  const tabId = tab.id;
+  _searchTabId = tabId;
+
+  await browser.search.search({
+    query,
+    tabId,
+  });
+
+  await focusSearchTab();
+  await browserUtil.waitForDocumentComplete(tabId);
+  await content.inject(tabId, "/intents/search/queryScript.content.js");
+  const searchInfo = await callScript({ type: "searchResultInfo" });
+
+  if (
+    searchInfo.searchResults === undefined ||
+    !searchInfo.searchResults.length > 0
+  ) {
+    const msg =
+      "Could not get list of search results.\n\nPlease click feedback to let us know.";
+    const e = new Error(msg);
+    e.displayMessage = msg;
+    throw e;
+  }
+
+  tabSearchResults.set(tabId, searchInfo);
+
+  context.keepPopup();
+  await context.startFollowup({
+    heading: "Say 'next' to view",
+    subheading: searchInfo.searchResults[0].title,
+    acceptFollowupIntent: ["search.next", "search.previous"],
+  });
 }
 
 /** Returns the popupSearchInfo if it's available, otherwise the active tab's searchInfo,
@@ -168,7 +227,7 @@ function pollForCard(maxTime) {
     }
     let card;
     try {
-      card = await callScript({ type: "cardImage" });
+      card = await callScript({ type: "cardContent", polling: true });
     } catch (e) {
       if (e.message && e.message.match(/Invalid Tab ID/i)) {
         stopCardPoll();
@@ -177,14 +236,14 @@ function pollForCard(maxTime) {
       throw e;
     }
     if (!card) {
-      catcher.capture(new Error(`callScript cardImage returned ${card}`));
+      catcher.capture(new Error(`callScript cardContent returned ${card}`));
       return;
     }
     if (card.src === lastImage) {
       return;
     }
     lastImage = card.src;
-    const response = await browser.runtime.sendMessage({
+    const response = await sendMessage({
       type: "refreshSearchCard",
       card,
     });
@@ -215,7 +274,7 @@ async function moveResult(context, step) {
 
   if (
     (searchInfo.index >= searchInfo.searchResults.length - 1 && step > 0) ||
-    (searchInfo.index <= 0 && step < 0)
+    (searchInfo.index < 0 && step < 0)
   ) {
     const tabId = await openSearchTab();
     await browserUtil.loadUrl(tabId, searchInfo.searchUrl);
@@ -223,6 +282,18 @@ async function moveResult(context, step) {
     // reset the index to an initial search result
     searchInfo.index = undefined;
     tabSearchResults.set(tabId, searchInfo);
+    await sendMessage({
+      type: "showSearchResults",
+      searchResults: searchInfo.searchResults,
+      searchUrl: searchInfo.searchUrl,
+      index: 0,
+    });
+    context.startFollowup({
+      heading: "Say 'next' to view",
+      subheading: searchInfo.searchResults[0].title,
+      acceptFollowupIntent: ["search.next", "search.previous"],
+      skipSuccessView: true,
+    });
     return;
   }
 
@@ -231,15 +302,11 @@ async function moveResult(context, step) {
   searchInfo.index =
     searchInfo.index === undefined ? 0 : searchInfo.index + step;
 
-  const item = searchInfo.searchResults[searchInfo.index];
-  await browser.runtime.sendMessage({
-    type: "showSearchResults",
-    searchResults: searchInfo.searchResults,
-    searchUrl: searchInfo.searchUrl,
-    index: searchInfo.index,
-  });
+  const item = searchInfo.searchResults[searchInfo.index] || {
+    url: searchInfo.searchUrl,
+  };
   if (!tabId) {
-    const tab = await context.createTab({ url: item.url });
+    const tab = await browserUtil.createAndLoadTab({ url: item.url });
     // eslint-disable-next-line require-atomic-updates
     lastTabId = tab.id;
     popupSearchInfo = null;
@@ -249,7 +316,7 @@ async function moveResult(context, step) {
     lastTabId = tabId;
     let exists = true;
     try {
-      await context.makeTabActive(tabId);
+      await browserUtil.makeTabActive(tabId);
     } catch (e) {
       if (String(e).includes("Invalid tab ID")) {
         exists = false;
@@ -267,6 +334,21 @@ async function moveResult(context, step) {
       tabSearchResults.delete(tabId);
     }
   }
+  await browserUtil.waitForDocumentComplete(lastTabId);
+  await sendMessage({
+    type: "showSearchResults",
+    searchResults: searchInfo.searchResults,
+    searchUrl: searchInfo.searchUrl,
+    index: searchInfo.index,
+  });
+  const nextItemIdx = step === 1 ? searchInfo.index + 1 : searchInfo.index - 1;
+  const nextItem = searchInfo.searchResults[nextItemIdx];
+  context.startFollowup({
+    heading: `Say '${step === 1 ? "next" : "previous"}' to view`,
+    subheading: nextItemIdx < 0 ? "Search Results" : nextItem.title,
+    acceptFollowupIntent: ["search.next", "search.previous"],
+    skipSuccessView: true,
+  });
 }
 
 export async function focusSearchResults(message) {
@@ -277,7 +359,7 @@ export async function focusSearchResults(message) {
     await browser.tabs.update({ url: searchUrl });
   }
   await focusSearchTab();
-  await browser.runtime.sendMessage({
+  await sendMessage({
     type: "closePopup",
     time: 0,
   });
@@ -312,10 +394,13 @@ intentRunner.registerIntent({
     }
 
     if (searchInfo.hasCard || searchInfo.hasSidebarCard) {
-      const card = await callScript({ type: "cardImage" });
+      const card = await callScript({
+        type: "cardContent",
+        speechOutput: settings.getSettings().speechOutput,
+      });
       context.keepPopup();
       searchInfo.index = -1;
-      await browser.runtime.sendMessage({
+      await sendMessage({
         type: "showSearchResults",
         card,
         searchResults: searchInfo.searchResults,
@@ -333,7 +418,7 @@ intentRunner.registerIntent({
     } else {
       context.keepPopup();
       searchInfo.index = 0;
-      await browser.runtime.sendMessage({
+      await sendMessage({
         type: "showSearchResults",
         searchResults: searchInfo.searchResults,
         searchUrl: searchInfo.searchUrl,
@@ -344,6 +429,8 @@ intentRunner.registerIntent({
       });
       lastTabId = tab.id;
       tabSearchResults.set(tab.id, searchInfo);
+
+      await browserUtil.waitForPageToLoadUsingSelector(tab.id);
     }
   },
 });
@@ -381,7 +468,7 @@ intentRunner.registerIntent({
         tabId: searchTabId,
       });
     } else if (searchTab.url !== searchInfo.searchUrl) {
-      await browser.tabs.update(searchTabId, { url: searchInfo.url });
+      await browser.tabs.update(searchTabId, { url: searchInfo.searchUrl });
     }
     await focusSearchTab();
   },
@@ -390,37 +477,12 @@ intentRunner.registerIntent({
 intentRunner.registerIntent({
   name: "search.searchPage",
   async run(context) {
+    // An old popup-only search result is no longer valid once a new search is made:
+    popupSearchInfo = null;
     if (buildSettings.android) {
       await performSearch(context.slots.query);
     } else {
-      const tab = await browser.tabs.create({
-        url: START_URL,
-        active: false,
-      });
-      const tabId = tab.id;
-      _searchTabId = tabId;
-
-      await browser.search.search({
-        query: context.slots.query,
-        tabId,
-      });
-
-      await focusSearchTab();
-      await content.lazyInject(tabId, "/intents/search/queryScript.js");
-      const searchInfo = await callScript({ type: "searchResultInfo" });
-
-      if (
-        searchInfo.searchResults === undefined ||
-        !searchInfo.searchResults.length > 0
-      ) {
-        const msg =
-          "Could not get list of search results.\n\nPlease click feedback to let us know.";
-        const e = new Error(msg);
-        e.displayMessage = msg;
-        throw e;
-      }
-
-      tabSearchResults.set(tabId, searchInfo);
+      await performSearchPage(context);
     }
   },
 });

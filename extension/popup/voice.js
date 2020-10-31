@@ -3,11 +3,14 @@
 import * as util from "../util.js";
 import * as vad from "./vad.js";
 import * as settings from "../settings.js";
+import { sendMessage } from "../communicate.js";
 
 const STT_SERVER_URL =
   buildSettings.sttServer || "https://speaktome-2.services.mozilla.com";
 const DEEP_SPEECH_URL = buildSettings.deepSpeechServer;
-const LANGUAGE = "en-US";
+
+const locale = settings.getSettings().userLocale || navigator.language;
+const LANGUAGE = locale && locale.startsWith("en-") ? locale : "en-US";
 
 export class Recorder {
   constructor(stream) {
@@ -104,7 +107,7 @@ export class Recorder {
     // Can be overridden!
   }
 
-  onEnd(jsonOrNull) {
+  onEnd(jsonOrNull, audioBlob) {
     // Can be overridden
   }
 
@@ -153,7 +156,7 @@ export class Recorder {
 
   async mediaStopped() {
     if (this.cancelled) {
-      this.onEnd(null);
+      this.onEnd(null, null);
       return;
     }
     const blob = new Blob(this.chunks, {
@@ -177,7 +180,7 @@ export class Recorder {
         },
       });
     } catch (e) {
-      browser.runtime.sendMessage({
+      sendMessage({
         type: "addTelemetry",
         properties: { serverErrorSpeech: `Connection error: ${e}` },
         doNotInit: true,
@@ -189,7 +192,7 @@ export class Recorder {
       this.sendForDeepSpeech(blob, deferredJson);
     });
     if (!response.ok) {
-      browser.runtime.sendMessage({
+      sendMessage({
         type: "addTelemetry",
         properties: {
           serverErrorSpeech: `Response error: ${response.status} ${response.statusText}`,
@@ -206,14 +209,14 @@ export class Recorder {
     }
     const json = await response.json();
     deferredJson.resolve(json);
-    browser.runtime.sendMessage({
+    sendMessage({
       type: "addTelemetry",
       properties: {
         serverTimeSpeech: Date.now() - startTime,
       },
       doNotInit: true,
     });
-    this.onEnd(json);
+    this.onEnd(json, blob);
   }
 
   async sendForDeepSpeech(audio, otherResponsePromise) {
@@ -258,7 +261,7 @@ export class Recorder {
         )}))\n` +
         `  ${utterance} (${formatConfidence(confidence)})`
     );
-    browser.runtime.sendMessage({
+    sendMessage({
       type: "addTelemetry",
       properties: {
         utteranceDeepSpeech: utterance,

@@ -3,34 +3,144 @@
 
 import * as browserUtil from "../browserUtil.js";
 
+const ONBOARDING_WAKEWORD_VIEW = false;
+
 export const Onboarding = ({
+  optinTechDataAlreadyShown,
   optinViewAlreadyShown,
+  askForAudio,
+  setCollectTechData,
   setOptinValue,
   setOptinViewShown,
   permissionError,
+  setWakewordOptinValue,
+  optinWakewordAlreadyShown,
+  wakewordActive,
 }) => {
   return (
     <div id="onboarding-wrapper">
-      {!optinViewAlreadyShown && (
+      {!optinViewAlreadyShown &&
+      !optinWakewordAlreadyShown &&
+      ONBOARDING_WAKEWORD_VIEW ? (
+        <OptinWakeword setWakewordOptinValue={setWakewordOptinValue} />
+      ) : null}
+      {!optinViewAlreadyShown &&
+      !optinTechDataAlreadyShown &&
+      (optinWakewordAlreadyShown || !ONBOARDING_WAKEWORD_VIEW) ? (
+        <OptinTechData setCollectTechData={setCollectTechData} />
+      ) : null}
+      {!optinViewAlreadyShown &&
+      optinTechDataAlreadyShown &&
+      (optinWakewordAlreadyShown || !ONBOARDING_WAKEWORD_VIEW) ? (
         <OptinVoiceTranscripts
           setOptinValue={setOptinValue}
           setOptinViewShown={setOptinViewShown}
+          askForAudio={askForAudio}
+          wakewordActive={wakewordActive}
         />
-      )}
-      {optinViewAlreadyShown && permissionError && (
+      ) : null}
+      {optinViewAlreadyShown && permissionError ? (
         <PermissionError permissionError={permissionError} />
-      )}
-      {optinViewAlreadyShown && !permissionError && (
+      ) : null}
+      {optinViewAlreadyShown && !permissionError ? (
         <React.Fragment>
-          <OnboardingPageContent />
+          <OnboardingPageContent wakewordActive={wakewordActive} />
           <Footer />
         </React.Fragment>
-      )}
+      ) : null}
     </div>
   );
 };
 
-const OptinVoiceTranscripts = ({ setOptinValue, setOptinViewShown }) => {
+const OptinWakeword = ({ setWakewordOptinValue }) => {
+  const updateWakewordSetting = event => {
+    event.preventDefault();
+    setWakewordOptinValue(!!event.target.value);
+  };
+  return (
+    <div id="optinWakeword" className="modal-wrapper">
+      <div className="modal">
+        <div className="modal-header">
+          <p className="success">Successfully Installed</p>
+          <h1>A hands free experience</h1>
+        </div>
+        <div className="modal-content">
+          <p>
+            Firefox Voice can listen for "Hey Firefox" to trigger the microphone
+            creating a 100% hands gree experience.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button
+            className="styled-button"
+            onClick={updateWakewordSetting}
+            value={true}
+          >
+            Yes, listen for "Hey Firefox"
+          </button>
+          <button
+            className="styled-button cancel-button"
+            onClick={updateWakewordSetting}
+          >
+            I'll click the mic icon to activate
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const OptinTechData = ({ setCollectTechData }) => {
+  const updateTechData = event => {
+    event.preventDefault();
+    setCollectTechData(!!event.target.value);
+  };
+  return (
+    <div id="optinTechData" className="modal-wrapper">
+      <div className="modal">
+        <div className="modal-header">
+          <h1>
+            Allow Firefox Voice to send technical and interaction data to
+            Mozilla?
+          </h1>
+        </div>
+        <div className="modal-content">
+          <p>
+            This includes high-level categorizations of requests (e.g., search,
+            close tab, and play music) and error reports. Changes to this
+            setting can be made any time in preferences.
+          </p>
+          <p className="warning">
+            Data is stored securely and without personally identifying
+            information.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button
+            className="styled-button"
+            onClick={updateTechData}
+            value={true}
+          >
+            Allow
+          </button>
+          <button
+            className="styled-button cancel-button"
+            onClick={updateTechData}
+          >
+            Don't allow
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const OptinVoiceTranscripts = ({
+  setOptinValue,
+  setOptinViewShown,
+  askForAudio,
+  wakewordActive,
+}) => {
   const updateVoiceTranscriptOptin = event => {
     event.preventDefault();
     setOptinValue(!!event.target.value);
@@ -41,32 +151,17 @@ const OptinVoiceTranscripts = ({ setOptinValue, setOptinViewShown }) => {
     <div id="optinVoiceTranscripts" className="modal-wrapper">
       <div className="modal">
         <div className="modal-header">
-          <p>Successfully Installed</p>
-          <h1>Allow Firefox Voice to Collect Voice Transcripts</h1>
+          {askForAudio ? (
+            <h1>Allow Firefox Voice to collect Voice Samples</h1>
+          ) : (
+            <h1>Allow Firefox Voice to Collect Voice Transcripts</h1>
+          )}
         </div>
-        <div className="modal-content">
-          <p>
-            For research purposes and in order to improve Firefox Voice and
-            related services, Mozilla would like to collect and analyze voice
-            transcripts. We store this data securely and without personally
-            identifying information. Can Firefox Voice store transcripts of your
-            voice recordings for research?
-          </p>
-          <p>
-            You’ll always be able to use Firefox Voice, even if you don’t allow
-            collection. The microphone is only active when triggered with a
-            button press or keyboard shortcut.
-          </p>
-          <p>
-            <a
-              href="/views/privacy-policy.html"
-              target="_blank"
-              onClick={browserUtil.activateTabClickHandler}
-            >
-              Learn how Mozilla protects your voice data.
-            </a>
-          </p>
-        </div>
+        {askForAudio ? (
+          <OptinAudioDescription wakewordActive={wakewordActive} />
+        ) : (
+          <OptinVoiceTranscriptsDescription wakewordActive={wakewordActive} />
+        )}
         <div className="modal-footer">
           <button
             className="styled-button"
@@ -79,7 +174,7 @@ const OptinVoiceTranscripts = ({ setOptinValue, setOptinViewShown }) => {
             className="styled-button cancel-button"
             onClick={updateVoiceTranscriptOptin}
           >
-            Don't Allow
+            Don't allow
           </button>
         </div>
       </div>
@@ -87,12 +182,77 @@ const OptinVoiceTranscripts = ({ setOptinValue, setOptinViewShown }) => {
   );
 };
 
-const OnboardingPageContent = () => {
+const OptinAudioDescription = ({ wakewordActive }) => {
+  return (
+    <div className="modal-content">
+      <p>
+        For research purposes and in order to improve Firefox Voice and related
+        services, Mozilla would like to store a transcript of your voice
+        recordings. We store this data securely and without personally
+        identifying information.
+      </p>
+      <p>
+        Can Firefox Voice store your voice recordings and associated transcript?
+        You’ll always be able to use Firefox Voice, even if you don’t allow
+        collection.
+      </p>
+      <p className="warning">
+        {wakewordActive
+          ? "Using “Hey Firefox” the microphone is active but audio will not be collected or sent to a server until after you say “Hey Firefox” or activate using a button press or keyboard shortcut."
+          : "The microphone is only active when triggered with a button press or keyboard shortcut."}
+      </p>
+      <p>
+        <a
+          href="/views/privacy-policy.html"
+          target="_blank"
+          onClick={browserUtil.activateTabClickHandler}
+        >
+          Learn more about how Mozilla uses and processes voice data.
+        </a>
+      </p>
+    </div>
+  );
+};
+
+const OptinVoiceTranscriptsDescription = ({ wakewordActive }) => {
+  return (
+    <div className="modal-content">
+      <p>
+        For research purposes and in order to improve Firefox Voice and related
+        services, Mozilla would like to store a transcript of your voice
+        recordings. We store this data securely and without personally
+        identifying information.
+      </p>
+      <p>
+        Can Firefox Voice store transcripts of your voice recordings? You’ll
+        always be able to use Firefox Voice, even if you don’t allow collection.
+      </p>
+      <p className="warning">
+        {wakewordActive
+          ? "Using “Hey Firefox” the microphone is active but audio will not be collected or sent to a server until after you say “Hey Firefox” or activate using a button press or keyboard shortcut."
+          : "The microphone is only active when triggered with a button press or keyboard shortcut."}
+      </p>
+      <p>
+        <a
+          href="/views/privacy-policy.html"
+          target="_blank"
+          onClick={browserUtil.activateTabClickHandler}
+        >
+          Learn more about how Mozilla uses and processes voice data.
+        </a>
+      </p>
+    </div>
+  );
+};
+
+const OnboardingPageContent = ({ wakewordActive }) => {
   return (
     <div id="onboarding-content">
-      <div id="toolbar-arrow-wrapper">
-        <div id="toolbar-arrow"></div>
-      </div>
+      {!wakewordActive ? (
+        <div id="toolbar-arrow-wrapper">
+          <div id="toolbar-arrow"></div>
+        </div>
+      ) : null}
       <div id="onboarding-logo">
         <img
           src="/assets/images/firefox-voice-logo.svg"
@@ -100,9 +260,32 @@ const OnboardingPageContent = () => {
         />
       </div>
       <div>
-        <GetStartedSection />
-        <TryItSection />
+        {wakewordActive ? (
+          <WakewordGetStartedSection />
+        ) : (
+          <div>
+            <GetStartedSection />
+            <TryItSection />
+          </div>
+        )}
       </div>
+    </div>
+  );
+};
+
+const WakewordGetStartedSection = () => {
+  return (
+    <div className="onboarding-section try-it mic-icon">
+      <h1>Say "Hey Firefox" to get started</h1>
+      <p>Ask things like</p>
+      <br></br>
+      <ul>
+        <li>Go to New York Times</li>
+        <li>Read the article on this page</li>
+        <li>Show movie times at the closest theater</li>
+        <li>Find my calendar tab</li>
+        <li>Shop for dog beds on Amazon</li>
+      </ul>
     </div>
   );
 };
@@ -111,7 +294,7 @@ const GetStartedSection = () => {
   const keyboardShortcut =
     navigator.platform === "MacIntel" ? "Command ⌘" : "Ctrl";
   return (
-    <div id="get-started" className="onboarding-section">
+    <div id="get-started" className="onboarding-section mic-icon">
       <h1>Get Started</h1>
       <p>Click the mic in the toolbar above.</p>
       <p>Or, try the keyboard shortcut.</p>
@@ -124,7 +307,7 @@ const GetStartedSection = () => {
 
 const TryItSection = () => {
   return (
-    <div id="try-it" className="onboarding-section">
+    <div className="onboarding-section try-it superhero-icon">
       <h1>Try Your New Super Power</h1>
       <p>Say things like</p>
       <ul>

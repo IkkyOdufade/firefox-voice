@@ -35,7 +35,7 @@ class YouTube extends serviceList.Service {
   }
   async playQuery(query) {
     const tabId = await this.getYoutubeTabId();
-    this.tab = await this.context.createTabGoogleLucky(`${query} youtube.com`, {
+    this.tab = await browserUtil.createTabGoogleLucky(`${query} youtube.com`, {
       openInTabId: tabId,
     });
     this.tabCreated = true;
@@ -60,12 +60,12 @@ class YouTube extends serviceList.Service {
   }
 
   async pause() {
-    await this.initTab("/services/youtube/player.js");
+    await this.initTab("/services/youtube/player.content.js");
     await this.callTab("pause");
   }
 
   async unpause() {
-    await this.initTab("/services/youtube/player.js");
+    await this.initTab("/services/youtube/player.content.js");
     await this.callTab("unpause");
   }
 
@@ -75,20 +75,15 @@ class YouTube extends serviceList.Service {
       if (exceptTabId && exceptTabId === tab.id) {
         continue;
       }
-      await content.lazyInject(tab.id, "/services/youtube/player.js");
+      await content.inject(tab.id, "/services/youtube/player.content.js");
       await this.callOneTab(tab.id, "pause");
     }
   }
 
   async move(direction) {
-    if (direction === "previous") {
-      const e = new Error("Cannot move to previous YouTube video");
-      e.displayMessage = `YouTube cannot do "${this.context.utterance}"`;
-      throw e;
-    }
     let tabs = await this.getAllTabs({ audible: true });
     if (!tabs.length) {
-      const currentTab = await this.context.activeTab();
+      const currentTab = await browserUtil.activeTab();
       if (currentTab.url.startsWith(this.baseUrl)) {
         tabs = [currentTab];
       } else {
@@ -99,36 +94,43 @@ class YouTube extends serviceList.Service {
     }
     // FIXME: doing this on all audible tabs is odd, though any situation with multiple tabs here is odd
     for (const tab of tabs) {
-      await content.lazyInject(tab.id, "/services/youtube/player.js");
-      await this.callOneTab(tab.id, "move", { direction });
+      if (direction === "previous") {
+        await browser.tabs.executeScript(tab.id, {
+          code: "window.history.back();",
+        });
+      } else {
+        await content.inject(tab.id, "/services/youtube/player.content.js");
+        await this.callOneTab(tab.id, "move", { direction });
+      }
     }
   }
 
-  async adjustVolume(volumeLevel) {
-    await this.initTab("/services/youtube/player.js");
-    await this.callTab("adjustVolume", { volumeLevel });
+  async adjustVolume(inputVolume, volumeLevel) {
+    const findAudibleTab = true;
+    await this.initTab("/services/youtube/player.content.js", findAudibleTab);
+    await this.callTab("adjustVolume", { inputVolume, volumeLevel });
   }
 
   async mute() {
-    await this.initTab(`/services/youtube/player.js`);
+    await this.initTab(`/services/youtube/player.content.js`);
     await this.callTab("mute");
   }
 
   async unmute() {
-    await this.initTab(`/services/youtube/player.js`);
+    await this.initTab(`/services/youtube/player.content.js`);
     await this.callTab("unmute");
   }
 
   async playAlbum(query) {
-    this.tab = await browserUtil.createTab({
+    this.tab = await browserUtil.createAndLoadTab({
       url: `${this.baseUrl}/search?q=${query} album`,
     });
     this.tabCreated = true;
     if (this.tabCreated) {
       const isAudible = await this.pollTabAudible(this.tab.id, 3000);
       if (!isAudible) {
-        const activeTabId = (await this.context.activeTab()).id;
-        this.context.makeTabActive(this.tab);
+        const activeTabId = (await browserUtil.activeTab()).id;
+        browserUtil.makeTabActive(this.tab);
         const nowAudible = await this.pollTabAudible(this.tab.id, 1000);
         if (
           nowAudible ||
@@ -138,14 +140,14 @@ class YouTube extends serviceList.Service {
           }))
         ) {
           if (this.tab.id !== activeTabId) {
-            this.context.makeTabActive(activeTabId);
+            browserUtil.makeTabActive(activeTabId);
           }
         } else {
           this.context.failedAutoplay(this.tab);
         }
       }
     }
-    await this.initTab("/services/youtube/player.js");
+    await this.initTab("/services/youtube/player.content.js");
     await this.callTab("playAlbum");
   }
 }
